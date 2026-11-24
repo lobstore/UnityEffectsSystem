@@ -1,56 +1,85 @@
-using LOGIYGames.EffectSystem;
-using R3;
 using System.Collections.Generic;
 using UnityEngine;
+
 namespace LOGIYGames.EffectSystem.Examples
 {
+    /// <summary>Creates and destroys effect UI views to mirror the controller's active effect list.</summary>
     public class PlayerEffectsUIBootstrap : MonoBehaviour
     {
-        private List<PlayerEffectPresenter> effectsPresenters = new();
-        private List<PlayerEffectView> effectsViews = new();
+        private readonly List<PlayerEffectPresenter> effectPresenters = new List<PlayerEffectPresenter>();
+        private readonly List<PlayerEffectView> effectViews = new List<PlayerEffectView>();
 
         [SerializeField] private GameObject effectPrefab;
         [SerializeField] private RectTransform effectsContainer;
+        [SerializeField] private EffectsController effects;
 
-        [SerializeField] EffectsController Effects;
-        void Awake()
+        private void OnEnable()
         {
-            Effects?.OnContinuousEffectsChanged.AddListener(UpdateEffectsViews);
-            UpdateEffectsViews(Effects.Effects);
+            if (effects == null || effectsContainer == null || effectPrefab == null)
+            {
+                Debug.LogWarning("PlayerEffectsUIBootstrap requires an EffectsController, container, and effect prefab.", this);
+                return;
+            }
+
+            effects.OnContinuousEffectsChanged.AddListener(UpdateEffectsViews);
+            UpdateEffectsViews(effects.Effects);
         }
-        private void UpdateEffectsViews(IReadOnlyList<RuntimeEffect> effects)
+
+        private void OnDisable()
         {
-
-            for (int i = 0; i < effectsContainer.childCount; i++)
+            if (effects != null && effects.OnContinuousEffectsChanged != null)
             {
-                Destroy(effectsContainer.GetChild(i).gameObject);
-            }
-            if (effectsPresenters.Count > 0)
-            {
-                effectsPresenters.Clear();
-            }
-            if (effectsViews.Count > 0)
-            {
-                foreach (var item in effectsViews)
-                {
-                    Destroy(item);
-                }
-                effectsViews.Clear();
+                effects.OnContinuousEffectsChanged.RemoveListener(UpdateEffectsViews);
             }
 
-            if (effects.Count > 0)
+            ClearViews();
+        }
+
+        private void UpdateEffectsViews(IReadOnlyList<RuntimeEffect> activeEffects)
+        {
+            if (effectsContainer == null || effectPrefab == null)
             {
-                foreach (var item in effects)
+                return;
+            }
+
+            ClearViews();
+
+            foreach (var effect in activeEffects)
+            {
+                if (effect == null || effect.Data == null || effect.Data.Icon == null)
                 {
-                    if (item.Data.Icon == null) return;
-                    var obj = Instantiate(effectPrefab);
-                    obj.transform.SetParent(effectsContainer, true);
-                    obj.transform.localScale = Vector3.one;
-                    var view = obj.GetComponent<PlayerEffectView>();
-                    effectsViews.Add(view);
-                    effectsPresenters.Add(new PlayerEffectPresenter(item, view));
+                    continue;
+                }
+
+                var instance = Instantiate(effectPrefab, effectsContainer, false);
+                instance.transform.localScale = Vector3.one;
+
+                var view = instance.GetComponent<PlayerEffectView>();
+                if (view == null)
+                {
+                    Debug.LogWarning("Effect UI prefab is missing PlayerEffectView.", instance);
+                    Destroy(instance);
+                    continue;
+                }
+
+                effectViews.Add(view);
+                effectPresenters.Add(new PlayerEffectPresenter(effect, view));
+            }
+        }
+
+        private void ClearViews()
+        {
+            for (var i = 0; i < effectViews.Count; i++)
+            {
+                if (effectViews[i] != null)
+                {
+                    effectViews[i].Unbind();
+                    Destroy(effectViews[i].gameObject);
                 }
             }
+
+            effectViews.Clear();
+            effectPresenters.Clear();
         }
     }
 }

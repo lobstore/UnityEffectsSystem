@@ -1,0 +1,131 @@
+{
+  "contractVersion": "1.0.0",
+  "package": {
+    "name": "com.logiygames.effects",
+    "displayName": "LOGIYGames Effects System",
+    "packageVersion": "0.1.0",
+    "unityVersion": "2022.3",
+    "assembly": "LOGIYGames.Effects",
+    "runtimeNamespace": "LOGIYGames.EffectSystem"
+  },
+  "agentGuidance": {
+    "corePurpose": "Authoring definitions and runtime effect instances. The active-effect controller is supplied as an optional Samples~ example, not as a core runtime type.",
+    "recommendedFlow": [
+      "Create an EffectDefinition asset or a derived asset type.",
+      "Implement a serializable RuntimeEffect subclass and an EffectFactory subclass.",
+      "Create a new effect with factory.Create().",
+      "Pass the effect to an owner-side controller such as the sample EffectsController.AddEffect().",
+      "Call RuntimeEffect.Dispose() when removing an active instance; Dispose invokes OnRemove and destroys its cloned EffectDefinition."
+    ],
+    "lifecycleOrder": [
+      "EffectFactory.Create constructs a new runtime object and clones the source EffectDefinition.",
+      "EffectsController.AddEffect calls RuntimeEffect.Initialize(owner) for both instant and continuous effects.",
+      "The effect is stored for Countdown or Passive lifetime types; Instant effects are not stored.",
+      "EffectsController invokes RuntimeEffect.OnApply().",
+      "For every active continuous effect, EffectsController invokes OnUpdate(Time.deltaTime).",
+      "When IsFinished becomes true, or when explicitly removed, EffectsController calls Dispose().",
+      "Dispose calls OnRemove exactly once per effect instance and destroys the per-instance ScriptableObject clone."
+    ],
+    "importantRules": [
+      "Never mutate the original authoring EffectDefinition to store a runtime value. RuntimeEffect.Data is a per-instance clone.",
+      "RuntimeEffect.Data remains a public field for Unity SerializeReference compatibility; treat it as read-only outside the effect implementation.",
+      "Call Initialize before OnApply; Owner is null before initialization.",
+      "Create one RuntimeEffect instance per application; do not reuse a disposed instance or apply it to another owner.",
+      "EffectsController is an optional sample implementation. Projects may implement their own controller.",
+      "The sample controller stacks effects by concrete runtime Type, not by EffectDefinition asset identity.",
+      "Instant effects are initialized, applied, and disposed immediately; use them for immediate one-shot operations.",
+      "The sample controller uses Time.deltaTime. Pausing with Time.timeScale = 0 stops countdown progress."
+    ]
+  },
+  "coreTypes": [
+    {
+      "name": "EffectDefinition",
+      "kind": "ScriptableObject",
+      "namespace": "LOGIYGames.EffectSystem",
+      "attributes": [
+        "CreateAssetMenu(fileName = New EffectData, menuName = Abilities/Effects/EffectData)"
+      ],
+      "fields": [
+        {"name":"Value","type":"float","access":"public property get/set","purpose":"Per-runtime-instance display/value slot; copied with the asset clone."},
+        {"name":"MaxStackSize","type":"int","default":1,"minimum":1,"purpose":"Maximum simultaneous runtime instances of the same concrete effect type in the sample controller."},
+        {"name":"Levels","type":"int","default":1,"minimum":1,"purpose":"Maximum level supported by the effect; the base constructor clamps initial Level."},
+        {"name":"VFX","type":"GameObject","purpose":"Optional visual-effect prefab. The core system does not instantiate it."},
+        {"name":"SFX","type":"AudioClip","purpose":"Optional sound asset. The core system does not play it."},
+        {"name":"Icon","type":"Sprite","purpose":"Optional UI icon."}
+      ],
+      "extensionPattern": "Derive from EffectDefinition and add serialized configuration fields, for example BaseDamage or ScaleFactor."
+    },
+    {
+      "name": "EffectFactory",
+      "kind": "abstract serializable class",
+      "constructor": "Implicit protected parameterless constructor",
+      "methods": [
+        {"name":"Create","signature":"abstract RuntimeEffect Create()","purpose":"Returns a new runtime instance. The caller owns its application/removal lifecycle."}
+      ]
+    },
+    {
+      "name": "RuntimeEffect",
+      "kind": "abstract serializable IDisposable class",
+      "nestedEnum": {
+        "name": "EffectLifeType",
+        "values": [
+          {"name":"Instant","meaning":"Applied once; not retained by the sample controller."},
+          {"name":"Countdown","meaning":"Continuous finite lifetime; removed when IsFinished is true."},
+          {"name":"Passive","meaning":"Continuous lifetime; remains until explicitly removed or finished."}
+        ]
+      },
+      "members": [
+        {"name":"Data","type":"EffectDefinition","kind":"public field","purpose":"Per-instance cloned definition; public field retained for SerializeReference compatibility."},
+        {"name":"Level","type":"int","default":1,"purpose":"Runtime level. Consumer must enforce level changes against Data.Levels."},
+        {"name":"LifecicleType","type":"EffectLifeType","kind":"abstract property","note":"Original misspelling retained for source compatibility."},
+        {"name":"LifecycleType","type":"EffectLifeType","kind":"read-only alias","note":"Correctly-spelled alias."},
+        {"name":"IsFinished","type":"bool","kind":"read-only property"},
+        {"name":"IsStackable","type":"bool","kind":"read-only property","rule":"Data != null && Data.MaxStackSize > 1"},
+        {"name":"OnApply","type":"abstract void OnApply()","rule":"Call after Initialize; implement gameplay application."},
+        {"name":"Initialize","type":"virtual void Initialize(GameObject owner)","rule":"Assigns Owner; rejects null and a different second owner."},
+        {"name":"OnUpdate","type":"virtual void OnUpdate(float delta)","rule":"Optional per-frame update hook."},
+        {"name":"OnRemove","type":"virtual void OnRemove()","rule":"Release effect-specific resources; invoked by Dispose."},
+        {"name":"Dispose","type":"void Dispose()","rule":"Idempotent; invokes OnRemove and destroys cloned Data."}
+      ],
+      "exceptions": [
+        "ArgumentNullException for a null definition in the constructor or a null owner in Initialize.",
+        "InvalidOperationException when initialized for a different owner.",
+        "ObjectDisposedException when Initialize or protected lifecycle guard is used after disposal."
+      ]
+    }
+  ],
+  "sampleTypes": [
+    {
+      "name":"EffectsController","namespace":"LOGIYGames.EffectSystem.Examples","location":"Samples~/Examples/EffectsController.cs","kind":"MonoBehaviour",
+      "members":[
+        {"name":"Effects","signature":"IReadOnlyList<RuntimeEffect> Effects","purpose":"Read-only view of active continuous effects."},
+        {"name":"OnContinuousEffectsChanged","type":"UnityEvent<IReadOnlyList<RuntimeEffect>>","purpose":"Raised whenever the active continuous list changes."},
+        {"name":"AddEffect","signature":"void AddEffect(RuntimeEffect effect)","purpose":"Initializes every effect, enforces stack policy for continuous types, applies it, and immediately disposes instant effects."},
+        {"name":"RemoveEffect","signature":"void RemoveEffect(RuntimeEffect effect)","purpose":"Removes the active instance and disposes it."}
+      ],
+      "stackPolicy":"Effects are grouped by GetType(). Non-stackable effects have cap 1; stackable effects use incoming Data.MaxStackSize; oldest matching effects are removed first."
+    },
+    {"name":"InstantDamageEffect","namespace":"LOGIYGames.EffectSystem.Examples","kind":"RuntimeEffect","lifecycle":"Instant","constructor":"InstantDamageEffect(DamageEffectDefinition effectData)","apply":"Applies BaseDamage to Health on owner and marks IsFinished."},
+    {"name":"DamageOverTimeEffect","namespace":"LOGIYGames.EffectSystem.Examples","kind":"RuntimeEffect","lifecycle":"Countdown","constructor":"DamageOverTimeEffect(DamageEffectDefinition effectData, float interval, float duration)","apply":"Starts IntervalTimer; applies BaseDamage to owner Health for each interval tick."},
+    {"name":"ChangeScaleEffect","namespace":"global (Samples~ example)","kind":"RuntimeEffect","lifecycle":"Countdown","constructor":"ChangeScaleEffect(ScalingEffectDefinition effectData, float duration)","apply":"Stores original localScale, applies ScaleFactor, and restores original localScale on removal."},
+    {"name":"PlayerEffectPresenter","namespace":"LOGIYGames.EffectSystem.Examples","kind":"serializable presenter","members":["RuntimeEffect Effect","PlayerEffectPresenter(RuntimeEffect effect, PlayerEffectView view)","Unbind()"]},
+    {"name":"PlayerEffectView","namespace":"LOGIYGames.EffectSystem.Examples","kind":"MonoBehaviour","members":["Bind(PlayerEffectPresenter presenter)","Unbind()"]},
+    {"name":"PlayerEffectsUIBootstrap","namespace":"LOGIYGames.EffectSystem.Examples","kind":"MonoBehaviour","purpose":"Subscribes to EffectsController and creates/removes effect UI views. Requires effect prefab with PlayerEffectView."},
+    {"name":"Health","namespace":"LOGIYGames.EffectSystem.Examples","kind":"MonoBehaviour","purpose":"Example health target used by sample damage effects. Not part of core runtime."},
+    {"name":"DamageEffectDefinition","kind":"EffectDefinition","field":"BaseDamage: float"},
+    {"name":"ScalingEffectDefinition","kind":"EffectDefinition","field":"ScaleFactor: float"},
+    {"name":"InstantDamageEffectFactory","kind":"EffectFactory","field":"effectData: DamageEffectDefinition"},
+    {"name":"DamageOverTimeEffectFactory","kind":"EffectFactory","fields":["effectData: DamageEffectDefinition","interval: float","duration: float"]},
+    {"name":"ScalingEffectFactory","kind":"EffectFactory","fields":["effectData: ScalingEffectDefinition","duration: float"]}
+  ],
+  "minimalExample": "Controller.AddEffect(factory.Create());",
+  "exampleImplementation": "[Serializable] public sealed class MyEffect : RuntimeEffect { public override EffectLifeType LifecicleType => EffectLifeType.Passive; public MyEffect(MyEffectDefinition data) : base(data) {} public override void OnApply() { ThrowIfDisposed(); if (!IsInitialized || Owner == null) throw new InvalidOperationException(); /* apply */ } public override void OnRemove() { /* restore state / stop timers */ } }",
+  "compatibilityNotes": [
+    "Unity 2022.3 package target.",
+    "Core namespace: LOGIYGames.EffectSystem.",
+    "Sample namespace: LOGIYGames.EffectSystem.Examples (except ChangeScaleEffect and ScalingEffectFactory which retain global namespace compatibility).",
+    "Core asmdef remains unchanged and has no references listed.",
+    "The public LifecycleType alias is added while retaining the original LifecicleType spelling.",
+    "No .meta files are modified."
+  ]
+}
